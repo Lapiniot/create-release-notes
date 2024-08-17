@@ -1,0 +1,19 @@
+name: Create release notes
+description: Create release notes GitHub action
+author: Lapiniot
+
+inputs:
+  tag_name:
+    description: The name of the tag
+    required: true
+  prev_tag_name:
+    description: The name of the tag for previous release
+    required: false
+
+outputs:
+  release_notes_content:
+    description: Release notes text content
+
+runs: 
+  using: node20
+  main: dist/index.js
