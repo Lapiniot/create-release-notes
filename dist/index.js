@@ -31090,11 +31090,65 @@ async function run() {
         const client = (0, github_1.getOctokit)(token);
         const { repo: { owner, repo } } = github_1.context;
         const tag = (0, core_1.getInput)("tag_name", { required: true }).replace("refs/tags/", "");
-        (0, core_1.setOutput)("release_notes_content", "Test release notes for " + tag);
+        let prevTag = (0, core_1.getInput)("prev_tag_name")?.replace("refs/tags/", "");
+        if (!prevTag) {
+            (0, core_1.info)("There was no 'prev_tag_name' specified. Falling back to the latest release tag.");
+            try {
+                var response = await client.rest.repos.getLatestRelease({ owner, repo });
+                prevTag = response.data.tag_name;
+            }
+            catch (error) {
+                (0, core_1.info)("Latest published full release for the repository doesn't exist yet. All suitable related issues will be included.");
+            }
+        }
+        const fetchCommits = (prevTag)
+            ? async function (client, page) {
+                const response = await client.rest.repos.compareCommits({ owner, repo, base: prevTag, head: tag, page, per_page: 100 });
+                return [response.data.commits, hasNextPage(response.headers.link)];
+            }
+            : async function (client, page) {
+                const response = await client.rest.repos.listCommits({ owner, repo, sha: tag, page, per_page: 100 });
+                return [response["data"], hasNextPage(response.headers.link)];
+            };
+        let page = 0;
+        const re = /\B#(\d+)\b/gm;
+        const issues = new Map();
+        while (true) {
+            const [commits, hasMore] = await fetchCommits(client, page++);
+            for (let index = 0; index < commits.length; index++) {
+                const { commit: { message } } = commits[index];
+                const matches = message.matchAll(re);
+                for (const [_, num] of matches) {
+                    const issueNumber = parseInt(num);
+                    if (!issues.has(issueNumber)) {
+                        try {
+                            const { data: issue } = await client.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                            issues.set(issueNumber, issue);
+                        }
+                        catch (error) {
+                            (0, core_1.warning)(`Issue #${issueNumber} cannot be found in this repository.`);
+                        }
+                    }
+                }
+            }
+            if (!hasMore)
+                break;
+        }
+        let markup = "";
+        for (let [_, { title, state, url }] of issues) {
+            if (state === "closed") {
+                markup += ` - [${title}](${url})\n`;
+            }
+        }
+        console.log(markup);
+        (0, core_1.setOutput)("release_notes_content", markup);
     }
     catch (error) {
         (0, core_1.setFailed)(error.message);
     }
+}
+function hasNextPage(link) {
+    return !!link && link.includes("rel=\"next\"");
 }
 run();
 
