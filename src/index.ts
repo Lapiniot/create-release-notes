@@ -67,9 +67,12 @@ async function run() {
         }
 
         let markup = "";
-        for (let [_, { title, state, url }] of issues) {
+        for (let [_, { title, state, html_url, assignees, ...other }] of issues) {
             if (state === "closed") {
-                markup += ` - [${title}](${url})\n`;
+                const assigneesList = assignees?.map(({ login, html_url, avatar_url }) =>
+                    `[<img src="${avatar_url}" width="20" height"20" alt="@${login}" /> ${login}](${html_url})`)
+                    .join(", ");
+                markup += ` - [${title}](${html_url}) (${assigneesList})\n`;
             }
         }
 
