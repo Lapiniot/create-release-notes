@@ -31,46 +31,47 @@ async function run() {
             }
         }
 
-        const fetchCommits = (prevTag)
-            ? async function (client: OctokitClient, page: number) {
-                const response = await client.rest.repos.compareCommits({ owner, repo, base: prevTag, head: tag, page, per_page: 100 });
-                return [response.data.commits, hasNextPage(response.headers.link)] as PageResult<Commit>;
-            }
-            : async function (client: OctokitClient, page: number) {
-                const response = await client.rest.repos.listCommits({ owner, repo, sha: tag, page, per_page: 100 });
-                return [response["data"], hasNextPage(response.headers.link)] as PageResult<Commit>;
-            }
+        const params = { owner, repo, per_page: 100 };
 
-        let page = 0;
-        const re = /\B#(\d+)\b/gm;
-        const issues = new Map<number, Issue>();
-
-        while (true) {
-            const [commits, hasMore] = await fetchCommits(client, page++);
-            for (let index = 0; index < commits.length; index++) {
-                const { commit: { message } } = commits[index];
-                const matches = message.matchAll(re);
-                for (const [_, num] of matches) {
-                    const issueNumber = parseInt(num);
-                    if (!issues.has(issueNumber)) {
-                        try {
-                            const { data: issue } = await client.rest.issues.get({ owner, repo, issue_number: issueNumber });
-                            issues.set(issueNumber, issue);
-                        } catch (error) {
-                            warning(`Issue #${issueNumber} cannot be found in this repository.`);
-                        }
+        const fetchCommits = prevTag
+            ? async function* () {
+                const response = await client.rest.repos.compareCommits({ ...params, base: prevTag, head: tag });
+                for (const commit of response.data.commits) {
+                    yield commit;
+                }
+            }
+            : async function* () {
+                const iterator = client.paginate.iterator(client.rest.repos.listCommits, { ...params, sha: tag });
+                for await (const { data } of iterator) {
+                    for (const commit of data) {
+                        yield commit;
                     }
                 }
             }
 
-            if (!hasMore) break;
+        const re = /\B#(\d+)\b/gm;
+        const issues = new Map<number, Issue>();
+
+        for await (const { commit: { message } } of fetchCommits()) {
+            const matches = message.matchAll(re);
+            for (const [_, num] of matches) {
+                const issueNumber = parseInt(num);
+                if (!issues.has(issueNumber)) {
+                    try {
+                        const { data: issue } = await client.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                        issues.set(issueNumber, issue);
+                    } catch (error) {
+                        warning(`Issue #${issueNumber} cannot be found in this repository.`);
+                    }
+                }
+            }
         }
 
         let markup = "";
-        for (let [_, { title, state, html_url, assignees, ...other }] of issues) {
+        for (let [_, { title, state, html_url, assignees }] of issues) {
             if (state === "closed") {
                 const assigneesList = assignees?.map(({ login, html_url }) =>
-                    `[${login}](${html_url})`)
+                    `[@${login}](${html_url})`)
                     .join(", ");
                 markup += ` - [${title}](${html_url}) (${assigneesList})\n`;
             }
@@ -82,11 +83,6 @@ async function run() {
     } catch (error) {
         setFailed((error as Error).message);
     }
-}
-
-
-function hasNextPage(link: string | undefined): boolean {
-    return !!link && link.includes("rel=\"next\"");
 }
 
 run();

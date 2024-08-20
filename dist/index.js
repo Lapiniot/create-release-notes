@@ -31101,43 +31101,43 @@ async function run() {
                 (0, core_1.info)("Latest published full release for the repository doesn't exist yet. All suitable related issues will be included.");
             }
         }
-        const fetchCommits = (prevTag)
-            ? async function (client, page) {
-                const response = await client.rest.repos.compareCommits({ owner, repo, base: prevTag, head: tag, page, per_page: 100 });
-                return [response.data.commits, hasNextPage(response.headers.link)];
+        const params = { owner, repo, per_page: 100 };
+        const fetchCommits = prevTag
+            ? async function* () {
+                const response = await client.rest.repos.compareCommits({ ...params, base: prevTag, head: tag });
+                for (const commit of response.data.commits) {
+                    yield commit;
+                }
             }
-            : async function (client, page) {
-                const response = await client.rest.repos.listCommits({ owner, repo, sha: tag, page, per_page: 100 });
-                return [response["data"], hasNextPage(response.headers.link)];
+            : async function* () {
+                const iterator = client.paginate.iterator(client.rest.repos.listCommits, { ...params, sha: tag });
+                for await (const { data } of iterator) {
+                    for (const commit of data) {
+                        yield commit;
+                    }
+                }
             };
-        let page = 0;
         const re = /\B#(\d+)\b/gm;
         const issues = new Map();
-        while (true) {
-            const [commits, hasMore] = await fetchCommits(client, page++);
-            for (let index = 0; index < commits.length; index++) {
-                const { commit: { message } } = commits[index];
-                const matches = message.matchAll(re);
-                for (const [_, num] of matches) {
-                    const issueNumber = parseInt(num);
-                    if (!issues.has(issueNumber)) {
-                        try {
-                            const { data: issue } = await client.rest.issues.get({ owner, repo, issue_number: issueNumber });
-                            issues.set(issueNumber, issue);
-                        }
-                        catch (error) {
-                            (0, core_1.warning)(`Issue #${issueNumber} cannot be found in this repository.`);
-                        }
+        for await (const { commit: { message } } of fetchCommits()) {
+            const matches = message.matchAll(re);
+            for (const [_, num] of matches) {
+                const issueNumber = parseInt(num);
+                if (!issues.has(issueNumber)) {
+                    try {
+                        const { data: issue } = await client.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                        issues.set(issueNumber, issue);
+                    }
+                    catch (error) {
+                        (0, core_1.warning)(`Issue #${issueNumber} cannot be found in this repository.`);
                     }
                 }
             }
-            if (!hasMore)
-                break;
         }
         let markup = "";
-        for (let [_, { title, state, html_url, assignees, ...other }] of issues) {
+        for (let [_, { title, state, html_url, assignees }] of issues) {
             if (state === "closed") {
-                const assigneesList = assignees?.map(({ login, html_url }) => `[${login}](${html_url})`)
+                const assigneesList = assignees?.map(({ login, html_url }) => `[@${login}](${html_url})`)
                     .join(", ");
                 markup += ` - [${title}](${html_url}) (${assigneesList})\n`;
             }
@@ -31148,9 +31148,6 @@ async function run() {
     catch (error) {
         (0, core_1.setFailed)(error.message);
     }
-}
-function hasNextPage(link) {
-    return !!link && link.includes("rel=\"next\"");
 }
 run();
 
