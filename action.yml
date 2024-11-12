@@ -9,11 +9,14 @@ inputs:
   prev_tag_name:
     description: The name of the tag for previous release
     required: false
+  configuration_file_path:
+    description: Specifies a path to a file in the repository containing configuration settings used for generating the release notes. If unspecified, the configuration file located in the repository at '.github/release.yml' or '.github/release.yaml' will be used. If that is not present, the default configuration will be used.
+    required: false
 
 outputs:
   release_notes_content:
     description: Release notes text content
 
-runs: 
+runs:
   using: node20
   main: dist/index.js

@@ -1,0 +1,51 @@
+{
+    "changelog": {
+        "exclude": {
+            "labels": [
+                "wontfix",
+                "question",
+                "experimental",
+                "epic",
+                "duplicate"
+            ]
+        },
+        "categories": [
+            {
+                "title": "New Features",
+                "labels": [
+                    "feature"
+                ]
+            },
+            {
+                "title": "Enchancements",
+                "labels": [
+                    "enhancement"
+                ],
+                "exclude": {
+                    "labels": [
+                        "feature",
+                        "bug"
+                    ]
+                }
+            },
+            {
+                "title": "Bug Fixes",
+                "labels": [
+                    "bug"
+                ]
+            },
+            {
+                "title": "Documentation Updates",
+                "labels": [
+                    "documentation"
+                ]
+            },
+            {
+                "title": "Other Changes",
+                "labels": [
+                    "*"
+                ]
+            }
+        ]
+    }
+}

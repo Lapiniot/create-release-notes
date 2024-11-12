@@ -1,0 +1,3 @@
+[submodule "ts-yaml"]
+	path = ts-yaml
+	url = https://github.com/Lapiniot/ts-yaml.git
