@@ -5,9 +5,8 @@
 			"type": "npm",
 			"script": "build",
 			"group": "build",
-			"problemMatcher": [],
-			"label": "npm: build",
-			"detail": "tsc && ncc build lib/index.js"
+			"problemMatcher": "$tsc",
+			"label": "npm: build"
 		}
 	]
 }

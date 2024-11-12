@@ -4,17 +4,17 @@
   "description": "create-release-notes GH action",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc && ncc build lib/index.js"
+    "build": "tsc && ncc build lib/src/index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@actions/core": "^1.10.1",
+    "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0",
-    "@types/node": "^22.3.0",
-    "@vercel/ncc": "^0.38.1",
+    "@types/node": "^22.9.0",
+    "@vercel/ncc": "^0.38.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "typescript": "^5.6.3"
   }
 }
