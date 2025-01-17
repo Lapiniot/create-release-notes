@@ -152,6 +152,28 @@ run();
 
 /***/ }),
 
+/***/ 5024:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isWhiteSpace = isWhiteSpace;
+exports.isEOL = isEOL;
+exports.isWhiteSpaceOrEOL = isWhiteSpaceOrEOL;
+function isWhiteSpace(code) {
+    return code === 0x20 || code === 0x09;
+}
+function isEOL(code) {
+    return code === 0x0A || code === 0x0D;
+}
+function isWhiteSpaceOrEOL(code) {
+    return code === 0x20 || code === 0x09 || code === 0x0A || code === 0x0D;
+}
+
+
+/***/ }),
+
 /***/ 3130:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -172,8 +194,9 @@ class default_1 {
 exports["default"] = default_1;
 class Context {
     constructor() {
-        this.entries = [];
-        this.transitionTo(this.enterState = new ConstructMappingState({}, 'root', -1));
+        this.mapEntries = [];
+        this.seqEntries = [];
+        this.transitionTo(this.enterState = new ConstructMappingState({ root: null }, 'root', -1));
     }
     get node() {
         return this.enterState.node["root"];
@@ -205,12 +228,10 @@ class ConstructMappingState extends State {
             case Tokenizer_1.TokenKind.Scalar:
                 if (token.indent > this.indent) {
                     const current = this.node[this.key];
-                    if (current) {
-                        this.node[this.key] = current + " " + token.value;
+                    if (current !== undefined && current !== null) {
+                        throw new Error(`Scalar value is not expected at this position (Ln ${token.line}, Col ${token.column})`);
                     }
-                    else {
-                        this.node[this.key] = token.value;
-                    }
+                    this.node[this.key] = token.value;
                 }
                 else {
                     // throw
@@ -223,10 +244,10 @@ class ConstructMappingState extends State {
                         if (this.node[this.key]) {
                             throw new Error(`Mapping key is not expected at this position (Ln ${ln}, Col ${col})`);
                         }
-                        this.context.transitionTo(new ConstructMappingState(this.context.entries[indent] = this.node[this.key] = { [key]: null }, key, indent));
+                        this.context.transitionTo(new ConstructMappingState(this.context.mapEntries[indent] = this.node[this.key] = {}, key, indent));
                     }
                     else {
-                        const node = this.context.entries[indent];
+                        const node = this.context.mapEntries[indent];
                         if (node) {
                             node[key] = null;
                             this.context.transitionTo(new ConstructMappingState(node, key, indent));
@@ -238,13 +259,13 @@ class ConstructMappingState extends State {
             case Tokenizer_1.TokenKind.SequenceEntry:
                 {
                     const { indent } = token;
-                    if (indent > this.indent) {
-                        this.context.transitionTo(new ConstructSequenceState(this.context.entries[indent] = this.node[this.key] = [], indent));
+                    if (indent >= this.indent) {
+                        this.context.transitionTo(new SequenceExpectValueOrNewMapping(this.context.seqEntries[indent] = this.node[this.key] = [], indent));
                     }
                     else {
-                        const node = this.context.entries[indent];
+                        const node = this.context.seqEntries[indent];
                         if (node) {
-                            this.context.transitionTo(new ConstructSequenceState(node, indent));
+                            this.context.transitionTo(new SequenceExpectValueOrNewMapping(node, indent));
                         }
                     }
                 }
@@ -254,7 +275,7 @@ class ConstructMappingState extends State {
         }
     }
 }
-class ConstructSequenceState extends State {
+class SequenceExpectValueOrNewMapping extends State {
     constructor(node, indent) {
         super(node);
         this.indent = indent;
@@ -263,18 +284,67 @@ class ConstructSequenceState extends State {
         switch (token.kind) {
             case Tokenizer_1.TokenKind.Scalar:
                 this.node.push(token.value);
+                this.context.transitionTo(new SequenceExpectEntryOrNewMapping(this.node, this.indent));
                 break;
             case Tokenizer_1.TokenKind.MappingKey:
                 {
                     const { indent, key } = token;
                     if (indent > this.indent) {
-                        const value = { [key]: null };
+                        const value = {};
                         this.node.push(value);
-                        this.context.entries[indent] = value;
+                        this.context.mapEntries[indent] = value;
                         this.context.transitionTo(new ConstructMappingState(value, key, indent));
                     }
                     else {
-                        const node = this.context.entries[indent];
+                        const node = this.context.mapEntries[indent];
+                        if (node) {
+                            node[key] = null;
+                            this.context.transitionTo(new ConstructMappingState(node, key, indent));
+                        }
+                        else {
+                            throw new Error(`Mapping should not start at this position (Ln ${token.line}, Col ${token.column})`);
+                        }
+                    }
+                }
+                ;
+                break;
+            case Tokenizer_1.TokenKind.Comment: break;
+            case Tokenizer_1.TokenKind.SequenceEntry:
+                {
+                    const { indent, line, column } = token;
+                    if (indent >= this.indent) {
+                        const value = [];
+                        this.node.push(value);
+                        this.context.transitionTo(new SequenceExpectValueOrNewMapping(this.context.seqEntries[indent] = value, indent));
+                    }
+                    else {
+                        throw new Error(`Unexpected TokenKind.SequenceEntry at this indentation level (${line},${column}).`);
+                    }
+                }
+                break;
+        }
+    }
+}
+class SequenceExpectEntryOrNewMapping extends State {
+    constructor(node, indent) {
+        super(node);
+        this.indent = indent;
+    }
+    handle(token) {
+        switch (token.kind) {
+            case Tokenizer_1.TokenKind.Scalar:
+                throw new Error("Unexpected state (TokenKind.Scalar)");
+            case Tokenizer_1.TokenKind.MappingKey:
+                {
+                    const { indent, key } = token;
+                    if (indent > this.indent) {
+                        const value = {};
+                        this.node.push(value);
+                        this.context.mapEntries[indent] = value;
+                        this.context.transitionTo(new ConstructMappingState(value, key, indent));
+                    }
+                    else {
+                        const node = this.context.mapEntries[indent];
                         if (node) {
                             node[key] = null;
                             this.context.transitionTo(new ConstructMappingState(node, key, indent));
@@ -293,9 +363,9 @@ class ConstructSequenceState extends State {
                         throw new Error(`Sequence entry is not expected at this position (Ln ${token.line}, Col ${token.column})`);
                     }
                     else {
-                        const node = this.context.entries[indent];
+                        const node = this.context.seqEntries[indent];
                         if (node) {
-                            this.context.transitionTo(new ConstructSequenceState(node, indent));
+                            this.context.transitionTo(new SequenceExpectValueOrNewMapping(node, indent));
                         }
                     }
                 }
@@ -309,22 +379,906 @@ class ConstructSequenceState extends State {
 
 /***/ }),
 
+/***/ 7524:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.BlockScalarState = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+const Types_1 = __nccwpck_require__(3180);
+const FinalState_1 = __nccwpck_require__(535);
+const ScalarState_1 = __nccwpck_require__(321);
+const State_1 = __nccwpck_require__(2433);
+class BlockScalarState extends State_1.State {
+    constructor(start, indent, line, column) {
+        super(start, line, column);
+        this.start = start;
+        this.indent = indent;
+    }
+    next() {
+        let { start: index, start, context: { text, text: { length } }, line, column, indent: blockIndent } = this;
+        let contentIndent = undefined;
+        let sb;
+        // #region Parse block header
+        let code = text.charCodeAt(index);
+        if (code >= 0x31 && code <= 0x39) {
+            contentIndent = blockIndent + (code - 0x30);
+            index++;
+        }
+        code = text.charCodeAt(index);
+        if (code === 0x2b) {
+            sb = this.createKeepModeStringBuilder();
+            index++;
+        }
+        else if (code === 0x2d) {
+            sb = this.createStripModeStringBuilder();
+            index++;
+        }
+        if (contentIndent === undefined) {
+            code = text.charCodeAt(index);
+            if (code >= 0x31 && code <= 0x39) {
+                contentIndent = blockIndent + (code - 0x30);
+                index++;
+            }
+        }
+        for (start = index; index < length && (0, Helpers_1.isWhiteSpace)(text.charCodeAt(index)); index++)
+            ;
+        if (index > start) {
+            // there might be valid comment present here
+            code = text.charCodeAt(index);
+            if (code === Types_1.Indicators.Hash) {
+                // strip one-line comment
+                for (index++; index < length && !(0, Helpers_1.isEOL)(text.charCodeAt(index)); index++)
+                    ;
+            }
+        }
+        if (index >= length) {
+            this.context.transitionTo(new FinalState_1.FinalState());
+            return { value: { kind: Types_1.TokenKind.Scalar, value: "", indent: blockIndent, line, column } };
+        }
+        switch (text.charCodeAt(index)) {
+            case Types_1.Indicators.CR:
+                index++;
+                if (text.charCodeAt(index) !== Types_1.Indicators.LF)
+                    break;
+            case Types_1.Indicators.LF:
+                index++;
+                break;
+            default:
+                this.throwInvalidBlockScalar(line, column);
+        }
+        sb ?? (sb = this.createClipModeStringBuilder());
+        // #endregion
+        line++, start = index;
+        for (let maxEmptyLineIndent = 0; index < length; index++, line++, start = index) {
+            if (contentIndent === undefined) {
+                // Detect content indentation
+                for (; index < length && (0, Helpers_1.isWhiteSpace)(text.charCodeAt(index)); index++)
+                    ;
+                const padding = index - start;
+                if (!(0, Helpers_1.isEOL)(text.charCodeAt(index))) {
+                    // First non-empty line
+                    if (padding < blockIndent) {
+                        this.context.transitionTo(new ScalarState_1.ScalarState(start, undefined, line, column));
+                        return { value: { kind: Types_1.TokenKind.Scalar, value: "", indent: blockIndent, line, column } };
+                    }
+                    else if (padding < maxEmptyLineIndent) {
+                        // Spec: "It is an error for any of the leading empty 
+                        // lines to contain more spaces than the first non-empty line"
+                        this.throwInvalidBlockScalar(this.line, this.column);
+                    }
+                    else {
+                        contentIndent = padding;
+                    }
+                }
+                else {
+                    maxEmptyLineIndent = Math.max(maxEmptyLineIndent, padding);
+                }
+            }
+            else {
+                const limit = Math.min(index + contentIndent, length);
+                for (; index < limit && (0, Helpers_1.isWhiteSpace)(text.charCodeAt(index)); index++)
+                    ;
+                const padding = index - start;
+                if (!(0, Helpers_1.isEOL)(text.charCodeAt(index))) {
+                    if (padding < blockIndent) {
+                        this.context.transitionTo(new ScalarState_1.ScalarState(start, undefined, line, column));
+                        return { value: { kind: Types_1.TokenKind.Scalar, value: sb.toString(), indent: blockIndent, line: this.line, column: this.column } };
+                    }
+                    else if (padding < contentIndent && index < length && !(0, Helpers_1.isEOL)(text.charCodeAt(index))) {
+                        // Spec: "It is an error if any non-empty line does not begin with a number of spaces 
+                        // greater than or equal to the content indentation level"
+                        this.throwInvalidBlockScalar(this.line, this.column);
+                    }
+                }
+            }
+            let offset = 0;
+            scan_line: for (start = index; index < length; index++) {
+                switch (text.charCodeAt(index)) {
+                    case Types_1.Indicators.CR:
+                        if (text.charCodeAt(index + 1) === Types_1.Indicators.LF) {
+                            index++;
+                            offset = -1;
+                        }
+                    case Types_1.Indicators.LF:
+                        break scan_line;
+                }
+            }
+            sb.appendLine(text.substring(start, index + offset));
+        }
+        const value = sb.toString();
+        this.context.transitionTo(new ScalarState_1.ScalarState(index, undefined, line, column));
+        return { value: { kind: Types_1.TokenKind.Scalar, value, indent: blockIndent, line: this.line, column: this.column } };
+    }
+}
+exports.BlockScalarState = BlockScalarState;
+
+
+/***/ }),
+
+/***/ 7248:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.CommentState = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+const ScalarState_1 = __nccwpck_require__(321);
+const State_1 = __nccwpck_require__(2433);
+class CommentState extends State_1.State {
+    next() {
+        const { start, context: { text, text: { length } } } = this;
+        let index = start;
+        for (; index < length; index++) {
+            if ((0, Helpers_1.isEOL)(text.codePointAt(index)))
+                break;
+        }
+        this.context.transitionTo(new ScalarState_1.ScalarState(index + 1, undefined, this.line + 1, 1));
+        return {
+            value: {
+                kind: State_1.TokenKind.Comment, text: text.substring(start, index).trim(),
+                line: this.line, column: this.column
+            }
+        };
+    }
+}
+exports.CommentState = CommentState;
+
+
+/***/ }),
+
+/***/ 3070:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DoubleQuoteScalarState = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+const StringBuilder_1 = __nccwpck_require__(5345);
+const ScalarState_1 = __nccwpck_require__(321);
+const State_1 = __nccwpck_require__(2433);
+class DoubleQuoteScalarState extends State_1.State {
+    constructor(start, indent, line, column) {
+        super(start, line, column);
+        this.start = start;
+        this.indent = indent;
+    }
+    next() {
+        const sb = new StringBuilder_1.FoldedFlowScalarStringBuilder();
+        const { context: { text, text: { length } } } = this;
+        for (let { start: index, start, indent, line, column } = this; index < length; line++, start = index) {
+            scan_line_loop: for (; index < length; index++) {
+                const code = text.charCodeAt(index);
+                switch (code) {
+                    case State_1.Indicators.DoubleQuote:
+                        sb.append(text.substring(start, index));
+                        if (line == this.line) {
+                            for (; index < length - 1 && (0, Helpers_1.isWhiteSpace)(text.codePointAt(index + 1)); index++)
+                                ;
+                            if (text.charCodeAt(index) === State_1.Indicators.Colon
+                                && (index + 1 >= length || (0, Helpers_1.isWhiteSpaceOrEOL)(text.charCodeAt(index + 1)))) {
+                                this.context.transitionTo(new ScalarState_1.ScalarState(index + 1, indent + 1, line, index - start + indent + 2));
+                                return { value: { kind: State_1.TokenKind.MappingKey, key: sb.toString(), indent, line, column } };
+                            }
+                        }
+                        this.context.transitionTo(new ScalarState_1.ScalarState(index + 1, undefined, line, column));
+                        return { value: { kind: State_1.TokenKind.Scalar, value: sb.toString(), indent, line, column } };
+                    case State_1.Indicators.Backslash:
+                        sb.append(text.substring(start, index));
+                        const [unescaped, consumed] = parseEscaped(text, index + 1);
+                        if (Number.isNaN(unescaped))
+                            this.throw("Invalid escape sequence", line, column);
+                        sb.append(String.fromCodePoint(unescaped));
+                        index += consumed;
+                        start = index + 1;
+                        break;
+                    case State_1.Indicators.CR:
+                        sb.appendLine(text.substring(start, index++));
+                        if (text.charCodeAt(index) === State_1.Indicators.LF)
+                            index++;
+                        break scan_line_loop;
+                    case State_1.Indicators.LF:
+                        sb.appendLine(text.substring(start, index++));
+                        break scan_line_loop;
+                }
+            }
+            // skip all leading whitespace chars for next line
+            for (; index < length && (0, Helpers_1.isWhiteSpace)(text.codePointAt(index)); index++)
+                ;
+        }
+        this.throw("Unexpected end of character sequence within double-quoted scalar", this.line, this.column);
+    }
+}
+exports.DoubleQuoteScalarState = DoubleQuoteScalarState;
+function parseEscaped(str, index) {
+    switch (str.charCodeAt(index)) {
+        case 0x30: return [0x00, 1]; //      \0  null
+        case 0x61: return [0x07, 1]; //      \a  bell
+        case 0x62: return [0x08, 1]; //      \b  backspace
+        case 0x74: return [0x09, 1]; //      \t  horizontal tab
+        case 0x6e: return [0x0a, 1]; //      \n  line feed
+        case 0x76: return [0x0b, 1]; //      \v  vertical tab
+        case 0x66: return [0x0c, 1]; //      \f  form feed
+        case 0x72: return [0x0d, 1]; //      \r  carriage return
+        case 0x65: return [0x1b, 1]; //      \e  escape
+        case 0x22: return [0x22, 1]; //      \"  double quote
+        case 0x2f: return [0x2f, 1]; //      \/ slash
+        case 0x5c: return [0x5c, 1]; //      \\  back slash
+        case 0x4e: return [0x85, 1]; //      \N  Unicode next line
+        case 0x5f: return [0xa0, 1]; //      \_  Unicode non-breaking space
+        case 0x4c: return [0x2028, 1]; //      \L  Unicode line separator 
+        case 0x50: return [0x2029, 1]; //      \P  Unicode paragraph separator
+        case 0x78: return parseHex(str, index + 1, 2); //      x[Hex]{2}   Escaped 8-bit Unicode character
+        case 0x75: return parseHex(str, index + 1, 4); //      x[Hex]{4}   Escaped 16-bit Unicode character
+        case 0x55: return parseHex(str, index + 1, 8); //      x[Hex]{8}   Escaped 32-bit Unicode character
+    }
+    return [NaN, 0];
+}
+function parseHex(str, index, numChars) {
+    const sequence = str.substring(index, index + numChars);
+    if (sequence.length !== numChars)
+        return [Number.NaN, 0];
+    const num = Number.parseInt(sequence, 16);
+    return [num, Number.isNaN(num) ? 0 : numChars + 1];
+}
+
+
+/***/ }),
+
+/***/ 535:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FinalState = void 0;
+const State_1 = __nccwpck_require__(2433);
+class FinalState extends State_1.State {
+    constructor() {
+        super(0, 0, 0);
+    }
+    next() {
+        return { done: true, value: undefined };
+    }
+}
+exports.FinalState = FinalState;
+
+
+/***/ }),
+
+/***/ 2974:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FoldedBlockScalarState = void 0;
+const SB = __importStar(__nccwpck_require__(5345));
+const BlockScalarState_1 = __nccwpck_require__(7524);
+class FoldedBlockScalarState extends BlockScalarState_1.BlockScalarState {
+    createKeepModeStringBuilder() {
+        return new SB.FoldedBlockScalarKeepModeStringBuilder();
+    }
+    createStripModeStringBuilder() {
+        return new SB.FoldedBlockScalarStripModeStringBuilder();
+    }
+    createClipModeStringBuilder() {
+        return new SB.FoldedBlockScalarClipModeStringBuilder();
+    }
+    throwInvalidBlockScalar(line, column) {
+        this.throw("Invalid folded block scalar", line, column);
+    }
+}
+exports.FoldedBlockScalarState = FoldedBlockScalarState;
+
+
+/***/ }),
+
+/***/ 4153:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LiteralBlockScalarState = void 0;
+const SB = __importStar(__nccwpck_require__(5345));
+const BlockScalarState_1 = __nccwpck_require__(7524);
+class LiteralBlockScalarState extends BlockScalarState_1.BlockScalarState {
+    createKeepModeStringBuilder() {
+        return new SB.LiteralBlockScalarKeepModeStringBuilder();
+    }
+    createStripModeStringBuilder() {
+        return new SB.LiteralBlockScalarStripModeStringBuilder();
+    }
+    createClipModeStringBuilder() {
+        return new SB.LiteralBlockScalarClipModeStringBuilder();
+    }
+    throwInvalidBlockScalar(line, column) {
+        this.throw("Invalid literal block scalar", line, column);
+    }
+}
+exports.LiteralBlockScalarState = LiteralBlockScalarState;
+
+
+/***/ }),
+
+/***/ 321:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ScalarState = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+const StringBuilder_1 = __nccwpck_require__(5345);
+const CommentState_1 = __nccwpck_require__(7248);
+const DoubleQuoteScalarState_1 = __nccwpck_require__(3070);
+const FinalState_1 = __nccwpck_require__(535);
+const FoldedBlockScalarState_1 = __nccwpck_require__(2974);
+const LiteralBlockScalarState_1 = __nccwpck_require__(4153);
+const SingleQuoteScalarState_1 = __nccwpck_require__(6511);
+const State_1 = __nccwpck_require__(2433);
+class ScalarState extends State_1.State {
+    constructor(start, expectedIndent, line, column) {
+        super(start, line, column);
+        this.start = start;
+        this.expectedIndent = expectedIndent;
+    }
+    next() {
+        const sb = new StringBuilder_1.FoldedFlowScalarStringBuilder();
+        const { context: { text, text: { length } } } = this;
+        scan_loop: for (let { start: index, start, expectedIndent: indent = 0, expectedIndent: blockIndent, line, column } = this; index < length; index++, indent = 0, start = index, line++, column = 1) {
+            for (; index < length && (0, Helpers_1.isWhiteSpace)(text.codePointAt(index)); index++)
+                ;
+            if (index >= length) {
+                break;
+            }
+            const code = text.codePointAt(index);
+            // compute effective line indentation
+            const padding = index - start;
+            indent += padding;
+            // capture first line indentation as effective block indentation level if it was not provided explicitely
+            // (this.indent property)
+            blockIndent = blockIndent || indent;
+            // Less indented block detection
+            if (indent < blockIndent && !(0, Helpers_1.isEOL)(code)) {
+                this.context.transitionTo(new ScalarState(start, undefined, line, 1));
+                return {
+                    value: {
+                        kind: State_1.TokenKind.Scalar, value: sb.toString().trim() || null,
+                        indent: blockIndent, line: this.line, column: this.column
+                    }
+                };
+            }
+            // Check for special markers that can change parsing mode, unless spans list already contains some accumulated 
+            // meaningful text (this basically means we are already parsing regular scalar text)
+            if (sb.isEmpty) {
+                // Sequence entry marker detection
+                switch (code) {
+                    case State_1.Indicators.Hyphen:
+                        if (index + 1 >= length || (0, Helpers_1.isWhiteSpaceOrEOL)(text.codePointAt(index + 1))) {
+                            this.context.transitionTo(new ScalarState(index + 1, indent + 1, line, column + padding + 1));
+                            return { value: { kind: State_1.TokenKind.SequenceEntry, indent, line, column: column + padding } };
+                        }
+                        index++;
+                        break;
+                    case State_1.Indicators.SingleQuote:
+                        this.context.transitionTo(new SingleQuoteScalarState_1.SingleQuoteScalarState(index + 1, indent, line, column + padding));
+                        return this.context.next();
+                    case State_1.Indicators.DoubleQuote:
+                        this.context.transitionTo(new DoubleQuoteScalarState_1.DoubleQuoteScalarState(index + 1, indent, line, column + padding));
+                        return this.context.next();
+                    case State_1.Indicators.VerticalBar:
+                        this.context.transitionTo(new LiteralBlockScalarState_1.LiteralBlockScalarState(index + 1, indent, line, column + padding));
+                        return this.context.next();
+                    case State_1.Indicators.GreaterThan:
+                        this.context.transitionTo(new FoldedBlockScalarState_1.FoldedBlockScalarState(index + 1, indent, line, column + padding));
+                        return this.context.next();
+                }
+            }
+            for (; index < length; index++) {
+                switch (text.codePointAt(index)) {
+                    case State_1.Indicators.CR: {
+                        const value = text.substring(start, index).trim();
+                        if (value || !sb.isEmpty)
+                            sb.appendLine(value);
+                        if (text.charCodeAt(index + 1) === State_1.Indicators.LF)
+                            index++;
+                        continue scan_loop;
+                    }
+                    case State_1.Indicators.LF: {
+                        const value = text.substring(start, index).trim();
+                        if (value || !sb.isEmpty)
+                            sb.appendLine(value);
+                        continue scan_loop;
+                    }
+                    // Mapping key-value pair detection
+                    case State_1.Indicators.Colon: {
+                        if (index + 1 < length && !(0, Helpers_1.isWhiteSpaceOrEOL)(text.codePointAt(index + 1))) {
+                            break;
+                        }
+                        if (sb.isEmpty) {
+                            this.context.transitionTo(new ScalarState(index + 1, indent + 1, line, column + index - start + 1));
+                            return {
+                                value: {
+                                    kind: State_1.TokenKind.MappingKey, key: text.substring(start, index).trim(),
+                                    indent, line, column: column + padding
+                                }
+                            };
+                        }
+                        this.context.transitionTo(new ScalarState(start, undefined, line, 1));
+                        return {
+                            value: {
+                                kind: State_1.TokenKind.Scalar, value: sb.toString().trim() || null,
+                                indent: blockIndent, line: this.line, column: this.column
+                            }
+                        };
+                    }
+                    // Comment line detection
+                    case State_1.Indicators.Hash: {
+                        if (index - 1 > 0 && !(0, Helpers_1.isWhiteSpaceOrEOL)(text.codePointAt(index - 1))) {
+                            break;
+                        }
+                        this.context.transitionTo(new CommentState_1.CommentState(index + 1, line, column + padding));
+                        if (sb.isEmpty) {
+                            return this.context.next();
+                        }
+                        sb.append(text.substring(start, index).trim());
+                        this.context.transitionTo(new CommentState_1.CommentState(index + 1, line, column + padding));
+                        return {
+                            value: {
+                                kind: State_1.TokenKind.Scalar, value: sb.toString().trim(),
+                                indent: blockIndent, line: this.line, column: this.column
+                            }
+                        };
+                    }
+                }
+            }
+            sb.append(text.substring(start, index).trim());
+        }
+        this.context.transitionTo(new FinalState_1.FinalState());
+        const value = sb.toString().trim() || null;
+        if (value === null && this.expectedIndent === undefined) {
+            // value == null - means we havn't parsed anything meaningful (only presentation
+            // level whitespaces or empty lines e.g.)
+            // expectedIndent == undefined - means we started parsing at arbitrary poisition without 
+            // any strict expecation of some meaningful value content being present.
+            // Thus, we shouldn't even return null-value token to the parser in this case.
+            return this.context.next();
+        }
+        return {
+            value: {
+                kind: State_1.TokenKind.Scalar, value,
+                indent: this.expectedIndent || 0,
+                line: this.line, column: this.column
+            }
+        };
+    }
+}
+exports.ScalarState = ScalarState;
+
+
+/***/ }),
+
+/***/ 6511:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SingleQuoteScalarState = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+const StringBuilder_1 = __nccwpck_require__(5345);
+const ScalarState_1 = __nccwpck_require__(321);
+const State_1 = __nccwpck_require__(2433);
+class SingleQuoteScalarState extends State_1.State {
+    constructor(start, indent, line, column) {
+        super(start, line, column);
+        this.start = start;
+        this.indent = indent;
+    }
+    next() {
+        const sb = new StringBuilder_1.FoldedFlowScalarStringBuilder();
+        const { context: { text, text: { length } } } = this;
+        for (let { start: index, start, indent, line, column } = this; index < length; line++, start = index) {
+            scan_line_loop: for (; index < length; index++) {
+                const code = text.charCodeAt(index);
+                switch (code) {
+                    case State_1.Indicators.SingleQuote:
+                        if (index + 1 < length && text.charCodeAt(index + 1) === State_1.Indicators.SingleQuote) {
+                            sb.append(text.substring(start, ++index));
+                            start = index + 1;
+                        }
+                        else {
+                            sb.append(text.substring(start, index));
+                            if (line == this.line) {
+                                for (; index < length - 1 && (0, Helpers_1.isWhiteSpace)(text.codePointAt(index + 1)); index++)
+                                    ;
+                                if (text.charCodeAt(index) === State_1.Indicators.Colon
+                                    && (index + 1 >= length || (0, Helpers_1.isWhiteSpaceOrEOL)(text.charCodeAt(index + 1)))) {
+                                    this.context.transitionTo(new ScalarState_1.ScalarState(index + 1, indent + 1, line, index - start + indent + 2));
+                                    return { value: { kind: State_1.TokenKind.MappingKey, key: sb.toString(), indent, line, column } };
+                                }
+                            }
+                            this.context.transitionTo(new ScalarState_1.ScalarState(index + 1, undefined, line, column));
+                            return { value: { kind: State_1.TokenKind.Scalar, value: sb.toString(), indent, line, column } };
+                        }
+                        break;
+                    case State_1.Indicators.CR:
+                        sb.appendLine(text.substring(start, index++));
+                        if (text.charCodeAt(index) === State_1.Indicators.LF)
+                            index++;
+                        break scan_line_loop;
+                    case State_1.Indicators.LF:
+                        sb.appendLine(text.substring(start, index++));
+                        break scan_line_loop;
+                }
+            }
+            // skip all leading whitespace chars for next line
+            for (; index < length && (0, Helpers_1.isWhiteSpace)(text.codePointAt(index)); index++)
+                ;
+        }
+        this.throw("Unexpected end of character sequence within single-quoted scalar", this.line, this.column);
+    }
+}
+exports.SingleQuoteScalarState = SingleQuoteScalarState;
+
+
+/***/ }),
+
+/***/ 2433:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Indicators = exports.TokenKind = exports.State = void 0;
+const Types_1 = __nccwpck_require__(3180);
+Object.defineProperty(exports, "TokenKind", ({ enumerable: true, get: function () { return Types_1.TokenKind; } }));
+Object.defineProperty(exports, "Indicators", ({ enumerable: true, get: function () { return Types_1.Indicators; } }));
+class State {
+    constructor(start, line, column) {
+        this.start = start;
+        this.line = line;
+        this.column = column;
+    }
+    setContext(context) {
+        this.context = context;
+    }
+    throw(message, line, column) {
+        throw new Error(`${message} at (Ln ${line}, Col ${column}).`);
+    }
+}
+exports.State = State;
+
+
+/***/ }),
+
+/***/ 5345:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FoldedBlockScalarClipModeStringBuilder = exports.FoldedBlockScalarKeepModeStringBuilder = exports.FoldedBlockScalarStripModeStringBuilder = exports.LiteralBlockScalarKeepModeStringBuilder = exports.LiteralBlockScalarClipModeStringBuilder = exports.LiteralBlockScalarStripModeStringBuilder = exports.FoldedFlowScalarStringBuilder = exports.StringBuilder = void 0;
+const Helpers_1 = __nccwpck_require__(5024);
+class StringBuilder {
+    constructor() {
+        // Allow storing null elements and treat them as explicit 
+        // line end marker instead of "\n" strings.
+        // This allows plain "\n" characters to be preserved and 
+        // not folded (from escape sequence in quoted string e.g.)
+        this.spans = [];
+    }
+    get isEmpty() {
+        return this.spans.length === 0;
+    }
+    append(span) {
+        if (span === "")
+            return;
+        this.spans.push(span);
+    }
+    appendLine(span = "") {
+        this.append(span);
+        this.spans.push(null);
+    }
+}
+exports.StringBuilder = StringBuilder;
+class FoldedFlowScalarStringBuilder extends StringBuilder {
+    toString() {
+        let str = "";
+        const { spans, spans: { length } } = this;
+        for (let i = 0; i < length; i++) {
+            const current = spans[i];
+            if (current === null) {
+                let breaks = 1;
+                for (; i < length - 1; i++, breaks++) {
+                    const next = spans[i + 1];
+                    if (next !== null) {
+                        break;
+                    }
+                }
+                str += "\n".repeat(breaks - 1) || " ";
+            }
+            else {
+                str += current;
+            }
+        }
+        return str;
+    }
+}
+exports.FoldedFlowScalarStringBuilder = FoldedFlowScalarStringBuilder;
+/**
+ * From the YAML spec:
+ * 8.1.1.2. Block Chomping Indicator
+ * Stripping is specified by the “-” chomping indicator. In this case, the final line break and any trailing
+ * empty lines are excluded from the scalar’s content.
+ */
+class LiteralBlockScalarStripModeStringBuilder extends StringBuilder {
+    toString() {
+        let str = "", length = this.spans.length;
+        const spans = this.spans;
+        for (; length > 0 && spans[length - 1] === null; length--)
+            ;
+        for (let i = 0; i < length; i++) {
+            const current = spans[i];
+            str += (current === null ? "\n" : current);
+        }
+        return str;
+    }
+}
+exports.LiteralBlockScalarStripModeStringBuilder = LiteralBlockScalarStripModeStringBuilder;
+/**
+ * From the YAML spec:
+ * 8.1.1.2. Block Chomping Indicator
+ * Clipping is the default behavior used if no explicit chomping indicator is specified.
+ * In this case, the final line break character is preserved in the scalar’s content. However,
+ * any trailing empty lines are excluded from the scalar’s content.
+ */
+class LiteralBlockScalarClipModeStringBuilder extends LiteralBlockScalarStripModeStringBuilder {
+    toString() {
+        const str = super.toString();
+        return str !== "" ? str + "\n" : str;
+    }
+}
+exports.LiteralBlockScalarClipModeStringBuilder = LiteralBlockScalarClipModeStringBuilder;
+/**
+ * From the YAML spec:
+ * 8.1.1.2. Block Chomping Indicator
+ * Keeping is specified by the “+” chomping indicator. In this case, the final line break and any
+ * trailing empty lines are considered to be part of the scalar’s content.
+ * These additional lines are not subject to folding.
+ */
+class LiteralBlockScalarKeepModeStringBuilder extends StringBuilder {
+    toString() {
+        let str = "";
+        const { spans, spans: { length } } = this;
+        for (let i = 0; i < length; i++) {
+            const current = spans[i];
+            str += (current === null ? "\n" : current);
+        }
+        return str;
+    }
+}
+exports.LiteralBlockScalarKeepModeStringBuilder = LiteralBlockScalarKeepModeStringBuilder;
+class FoldedBlockScalarStripModeStringBuilder extends StringBuilder {
+    toString() {
+        let str = "";
+        const { spans, spans: { length } } = this;
+        for (let i = 0, preserve = true; i < length; i++) {
+            const current = spans[i];
+            if (current === null) {
+                let breaks = 1;
+                for (; i < length - 1; i++, breaks++) {
+                    const next = spans[i + 1];
+                    if (next !== null) {
+                        preserve || (preserve = (0, Helpers_1.isWhiteSpace)(next.charCodeAt(0)));
+                        str += preserve ? "\n".repeat(breaks) : ("\n".repeat(breaks - 1) || " ");
+                        break;
+                    }
+                }
+            }
+            else {
+                str += current;
+                // Set preserve flag if more indented line is detected, 
+                // otherwise reset to allow folding at next iterations
+                preserve = (0, Helpers_1.isWhiteSpace)(current.charCodeAt(0));
+            }
+        }
+        return str;
+    }
+}
+exports.FoldedBlockScalarStripModeStringBuilder = FoldedBlockScalarStripModeStringBuilder;
+class FoldedBlockScalarKeepModeStringBuilder extends StringBuilder {
+    toString() {
+        let str = "";
+        const { spans, spans: { length } } = this;
+        main_loop: for (let i = 0, preserve = true; i < length; i++) {
+            const current = spans[i];
+            if (current === null) {
+                let breaks = 1;
+                for (; i < length - 1; i++, breaks++) {
+                    const next = spans[i + 1];
+                    if (next !== null) {
+                        preserve || (preserve = (0, Helpers_1.isWhiteSpace)(next.charCodeAt(0)));
+                        str += preserve ? "\n".repeat(breaks) : ("\n".repeat(breaks - 1) || " ");
+                        continue main_loop;
+                    }
+                }
+                // From the spec:
+                // Keeping is specified by the “+” chomping indicator. In this case, the final 
+                // line break and any trailing empty lines are considered to be part of the 
+                // scalar’s content. These additional lines are not subject to folding.
+                str += "\n".repeat(breaks);
+            }
+            else {
+                str += current;
+                // Set preserve flag if more indented line is detected, 
+                // otherwise reset to allow folding at next iterations
+                preserve = (0, Helpers_1.isWhiteSpace)(current.charCodeAt(0));
+            }
+        }
+        return str;
+    }
+}
+exports.FoldedBlockScalarKeepModeStringBuilder = FoldedBlockScalarKeepModeStringBuilder;
+class FoldedBlockScalarClipModeStringBuilder extends FoldedBlockScalarStripModeStringBuilder {
+    toString() {
+        const str = super.toString();
+        return str !== "" ? str + "\n" : str;
+    }
+}
+exports.FoldedBlockScalarClipModeStringBuilder = FoldedBlockScalarClipModeStringBuilder;
+
+
+/***/ }),
+
 /***/ 4664:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.TokenKind = exports.Tokenizer = void 0;
+const TokenizerCore_1 = __nccwpck_require__(8087);
+const Types_1 = __nccwpck_require__(3180);
+Object.defineProperty(exports, "TokenKind", ({ enumerable: true, get: function () { return Types_1.TokenKind; } }));
 class Tokenizer {
     constructor(text) {
         this.text = text;
     }
     [Symbol.iterator]() {
-        return new TokenizerCore(this.text);
+        return new TokenizerCore_1.TokenizerCore(this.text);
     }
 }
 exports.Tokenizer = Tokenizer;
+
+
+/***/ }),
+
+/***/ 8087:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TokenizerCore = void 0;
+const ScalarState_1 = __nccwpck_require__(321);
+class TokenizerCore {
+    constructor(text) {
+        this.text = text;
+        this.transitionTo(new ScalarState_1.ScalarState(0, undefined, 1, 1));
+    }
+    next() {
+        return this.state.next();
+    }
+    transitionTo(state) {
+        this.state = state;
+        this.state.setContext(this);
+    }
+}
+exports.TokenizerCore = TokenizerCore;
+
+
+/***/ }),
+
+/***/ 3180:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Indicators = exports.TokenKind = void 0;
 var TokenKind;
 (function (TokenKind) {
     TokenKind[TokenKind["Scalar"] = 0] = "Scalar";
@@ -336,188 +1290,15 @@ var Indicators;
 (function (Indicators) {
     Indicators[Indicators["DoubleQuote"] = 34] = "DoubleQuote";
     Indicators[Indicators["SingleQuote"] = 39] = "SingleQuote";
-    Indicators[Indicators["SequenceEntry"] = 45] = "SequenceEntry";
-    Indicators[Indicators["MappingKey"] = 63] = "MappingKey";
-    Indicators[Indicators["MappingValue"] = 58] = "MappingValue";
-    Indicators[Indicators["Comment"] = 35] = "Comment";
+    Indicators[Indicators["Hyphen"] = 45] = "Hyphen";
+    Indicators[Indicators["Colon"] = 58] = "Colon";
+    Indicators[Indicators["Hash"] = 35] = "Hash";
     Indicators[Indicators["CR"] = 13] = "CR";
     Indicators[Indicators["LF"] = 10] = "LF";
-})(Indicators || (Indicators = {}));
-class TokenizerCore {
-    constructor(text) {
-        this.text = text;
-        this.transitionTo(new ScalarState(0, undefined, 1, 1));
-    }
-    next() {
-        return this.state.next();
-    }
-    transitionTo(state) {
-        this.state = state;
-        this.state.setContext(this);
-    }
-}
-class State {
-    constructor(start, line, column) {
-        this.start = start;
-        this.line = line;
-        this.column = column;
-    }
-    setContext(context) {
-        this.context = context;
-    }
-    moveNext(state) {
-        this.context.transitionTo(state);
-        return this.context.next();
-    }
-}
-class ScalarState extends State {
-    constructor(start, indent, line, column) {
-        super(start, line, column);
-        this.start = start;
-        this.indent = indent;
-    }
-    next() {
-        const chunks = [];
-        const { context: { text, text: { length } } } = this;
-        for (let { start: index, start, indent = 0, indent: blockIndent, line, column } = this; index < length; index++, indent = 0, start = index, line++, column = 1) {
-            for (; index < length && isWhiteSpace(text.codePointAt(index)); index++)
-                ;
-            if (index >= length) {
-                break;
-            }
-            // compute effective line indentation
-            const padding = index - start;
-            indent += padding;
-            // capture first line indentation as effective block indentation level if it was not provided explicitely
-            // (this.indent property)
-            blockIndent = blockIndent || indent;
-            const code = text.codePointAt(index);
-            // Less indented block detection
-            if (indent < blockIndent && !isEOL(code)) {
-                this.context.transitionTo(new ScalarState(start, undefined, line, 1));
-                return {
-                    value: {
-                        kind: TokenKind.Scalar, value: fold(chunks),
-                        indent: blockIndent, line: this.line, column: this.column
-                    }
-                };
-            }
-            // Sequence entry marker detection
-            if (code === Indicators.SequenceEntry) {
-                if (index + 1 >= length || isWhiteSpaceOrEOL(text.codePointAt(index + 1))) {
-                    if (chunks.length === 0) {
-                        this.context.transitionTo(new ScalarState(index + 1, indent + 1, line, column + padding + 1));
-                        return { value: { kind: TokenKind.SequenceEntry, indent, line, column: column + padding } };
-                    }
-                    this.context.transitionTo(new ScalarState(start, undefined, line, 1));
-                    return {
-                        value: {
-                            kind: TokenKind.Scalar, value: fold(chunks),
-                            indent: blockIndent, line: this.line, column: this.column
-                        }
-                    };
-                }
-                index++;
-            }
-            scan_line_loop: for (; index < length; index++) {
-                switch (text.codePointAt(index)) {
-                    case Indicators.LF: {
-                        break scan_line_loop;
-                    }
-                    // Mapping key-value pair detection
-                    case Indicators.MappingValue: {
-                        if (index + 1 < length && !isWhiteSpaceOrEOL(text.codePointAt(index + 1))) {
-                            break;
-                        }
-                        if (chunks.length === 0) {
-                            this.context.transitionTo(new ScalarState(index + 1, indent + 1, line, column + index - start + 1));
-                            return {
-                                value: {
-                                    kind: TokenKind.MappingKey, key: text.substring(start, index).trim(),
-                                    indent, line, column: column + padding
-                                }
-                            };
-                        }
-                        this.context.transitionTo(new ScalarState(start, undefined, line, 1));
-                        return {
-                            value: {
-                                kind: TokenKind.Scalar, value: fold(chunks),
-                                indent: blockIndent, line: this.line, column: this.column
-                            }
-                        };
-                    }
-                    // Comment line detection
-                    case Indicators.Comment: {
-                        if (index - 1 > 0 && !isWhiteSpaceOrEOL(text.codePointAt(index - 1))) {
-                            break;
-                        }
-                        this.context.transitionTo(new CommentState(index + 1, line, column + padding));
-                        if (chunks.length === 0) {
-                            return this.context.next();
-                        }
-                        chunks.push(text.substring(start, index).trim());
-                        this.context.transitionTo(new CommentState(index + 1, line, column + padding));
-                        return {
-                            value: {
-                                kind: TokenKind.Scalar, value: fold(chunks),
-                                indent: blockIndent, line: this.line, column: this.column
-                            }
-                        };
-                    }
-                }
-            }
-            chunks.push(text.substring(start, index).trim());
-        }
-        this.context.transitionTo(new FinalState());
-        const value = fold(chunks);
-        return value
-            ? {
-                value: {
-                    kind: TokenKind.Scalar, value,
-                    indent: this.indent || 0,
-                    line: this.line, column: this.column
-                }
-            }
-            : this.context.next();
-    }
-}
-class CommentState extends State {
-    next() {
-        const { start, context: { text, text: { length } } } = this;
-        let index = start;
-        for (; index < length; index++) {
-            if (text.codePointAt(index) === Indicators.LF)
-                break;
-        }
-        this.context.transitionTo(new ScalarState(index + 1, undefined, this.line + 1, 1));
-        return {
-            value: {
-                kind: TokenKind.Comment, text: text.substring(start, index).trim(),
-                line: this.line, column: this.column
-            }
-        };
-    }
-}
-class FinalState extends State {
-    constructor() {
-        super(0, 0, 0);
-    }
-    next() {
-        return { done: true, value: undefined };
-    }
-}
-function fold(chunks) {
-    return chunks.reduce((prev, curent) => prev + (curent ? (prev[prev.length - 1] !== "\n" ? " " : "") + curent : "\n"), "").trim() || null;
-}
-function isWhiteSpace(code) {
-    return code === 0x20 || code === 0x09;
-}
-function isEOL(code) {
-    return code === Indicators.LF || code === Indicators.CR;
-}
-function isWhiteSpaceOrEOL(code) {
-    return code === 0x20 || code === 0x09 || code === Indicators.LF || code === Indicators.CR;
-}
+    Indicators[Indicators["Backslash"] = 92] = "Backslash";
+    Indicators[Indicators["VerticalBar"] = 124] = "VerticalBar";
+    Indicators[Indicators["GreaterThan"] = 62] = "GreaterThan";
+})(Indicators || (exports.Indicators = Indicators = {}));
 
 
 /***/ }),
