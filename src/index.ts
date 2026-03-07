@@ -1,7 +1,7 @@
 import { getInput, info, setFailed, setOutput, warning } from "@actions/core";
 import { context, getOctokit } from "@actions/github";
-import YAML from "../ts-yaml/src/Parser";
-import defaultConfig from "./release.json";
+import YAML from "../ts-yaml/src/Parser.js";
+import defaultConfig from "./release.json" with { type: "json" };
 
 type Unwrap<T> = T extends Promise<infer P> ? P : T;
 type OctokitClient = ReturnType<typeof getOctokit>;
@@ -27,11 +27,11 @@ async function run() {
 
         const { repo: { owner, repo } } = context;
 
-        const tag = getInput("tag_name", { required: true }).replace("refs/tags/", "");
-        let prevTag = getInput("prev_tag_name")?.replace("refs/tags/", "");
+        const tag = getInput("tag-name", { required: true }).replace("refs/tags/", "");
+        let prevTag = getInput("prev-tag-name")?.replace("refs/tags/", "");
 
         if (!prevTag) {
-            info("There was no 'prev_tag_name' specified. Falling back to the latest release tag.")
+            info("There was no 'prev-tag-name' specified. Falling back to the latest release tag.")
 
             try {
                 var response = await client.rest.repos.getLatestRelease({ owner, repo });
@@ -158,14 +158,14 @@ async function run() {
             }
         }
 
-        setOutput("release_notes_content", markup);
+        setOutput("release-notes-content", markup);
     } catch (error) {
         setFailed((error as Error).message);
     }
 }
 
 function* getConfigPaths() {
-    const configPath = getInput("configuration_file_path");
+    const configPath = getInput("configuration-file-path");
     if (configPath) {
         yield configPath;
     } else {

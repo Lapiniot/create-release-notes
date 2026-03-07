@@ -9,8 +9,8 @@
             "type": "node",
             "request": "launch",
             "runtimeArgs": [
-                "-r",
-                "ts-node/register"
+                "--loader",
+                "ts-node/esm"
             ],
             "program": "${workspaceFolder}/src/index.ts",
             "envFile": "${workspaceFolder}/.env",

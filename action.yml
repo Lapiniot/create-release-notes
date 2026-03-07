@@ -3,20 +3,20 @@ description: Create release notes GitHub action
 author: Lapiniot
 
 inputs:
-  tag_name:
+  tag-name:
     description: The name of the tag
     required: true
-  prev_tag_name:
+  prev-tag-name:
     description: The name of the tag for previous release
     required: false
-  configuration_file_path:
+  configuration-file-path:
     description: Specifies a path to a file in the repository containing configuration settings used for generating the release notes. If unspecified, the configuration file located in the repository at '.github/release.yml' or '.github/release.yaml' will be used. If that is not present, the default configuration will be used.
     required: false
 
 outputs:
-  release_notes_content:
+  release-notes-content:
     description: Release notes text content
 
 runs:
-  using: node20
+  using: node24
   main: dist/index.js
